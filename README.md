@@ -1,42 +1,42 @@
 # Bulk Certificate Generator API
 
-A small Python API that accepts one request containing several recipients, creates one PDF certificate per valid recipient, records each outcome, and lets you check progress or download a finished PDF.
+A Python API that accepts one request for several people, creates a separate PDF certificate for each valid recipient, and reports the result for every row.
 
-## How the pieces work
+## Contents
 
-```text
-POST request
-    -> Module 1: validate shared details and each recipient row
-    -> Module 2: save the job and recipient outcomes in SQLite
-    -> Module 4: process valid rows one at a time
-    -> Module 3: render each certificate as a PDF
-    -> Module 2: save progress and results
-    -> status endpoint / PDF download endpoint
-```
+- [What it does](#what-it-does)
+- [Clone the repository](#clone-the-repository)
+- [Set up the project](#set-up-the-project)
+- [Run the API](#run-the-api)
+- [Try it in Postman](#try-it-in-postman)
+- [Get a certificate](#get-a-certificate)
+- [Run the tests](#run-the-tests)
+- [How it is built](#how-it-is-built)
+- [Limits and measured performance](#limits-and-measured-performance)
 
-- **Module 1 — `app/schemas.py`:** trims and validates the request. Invalid recipients remain visible as individual results; they do not stop valid rows.
-- **Module 2 — `app/database.py`, `app/models.py`, `app/repositories.py`:** stores job and recipient status in a relational SQLite database.
-- **Module 3 — `app/certificate_generator.py`:** creates the single predefined PDF design.
-- **Module 4 — `app/job_service.py`:** processes each valid recipient and records success or failure.
-- **Module 5 — `app/routes.py`, `app/main.py`:** HTTP endpoints and application setup.
-- **Module 6 — this README and `scripts/benchmark_api.py`:** setup and repeatable throughput measurement.
+## What it does
 
-## Requirements
+1. Accepts certificate details and a list of recipients in one `POST` request.
+2. Checks shared fields and validates each recipient row.
+3. Creates one PDF for each valid recipient and records each outcome.
+4. Lets you check job progress and download successful certificates.
 
-Python 3.10 or newer is recommended. The project uses FastAPI, SQLite through SQLAlchemy, and ReportLab for PDF creation.
+The API uses one predefined certificate design. An invalid recipient row does not prevent valid rows in the same job from being processed.
 
-## Clone the public repository
+## Clone the repository
 
-Repository publication is in progress. Once it is published, clone it with:
+Clone the public repository with:
 
 ```sh
 git clone https://github.com/MARKEE-code-sketch/bulk-certificate-generator-api.git
 cd bulk-certificate-generator-api
 ```
 
-Then follow the setup instructions below. The repository contains the application and its documentation; local environment files, generated PDFs/database files, and the assignment documents are not part of the public source.
+## Set up the project
 
-### Windows PowerShell setup
+Python 3.10 or newer is recommended.
+
+### Windows PowerShell
 
 ```powershell
 py -m venv .venv
@@ -44,13 +44,21 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-If PowerShell blocks activation, call the virtual-environment Python directly:
+If PowerShell does not allow virtual-environment activation, call its Python directly:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### macOS/Linux setup
+### Windows Command Prompt
+
+```cmd
+py -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
+```
+
+### macOS or Linux
 
 ```sh
 python3 -m venv .venv
@@ -58,100 +66,37 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-## Start the API
+## Run the API
 
-From the project folder:
+From the project directory, start the local server:
 
 ```sh
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-On Windows, you can instead run `.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000`.
-
-Open interactive API documentation at <http://127.0.0.1:8000/docs>. The default database is `data/certificates.db`, and generated files go to `data/certificates/`. These local paths can be changed with `DATABASE_URL` and `CERTIFICATE_OUTPUT_DIR` environment variables.
-
-## Create a bulk certificate job
-
-Send one POST request. The initial guardrail is **100 recipient rows per job**. This limits the size of a single request; it does not say how many HTTP requests the server can handle per second.
-
-Save the following as `request.json`:
-
-```json
-{
-  "event_name": "Applied AI Workshop",
-  "issue_date": "2026-10-08",
-  "issuer_name": "Applied AI Team",
-  "recipients": [
-    {"name": "Asha Kumar", "email": "asha@example.com"},
-    {"name": "Ravi Shah", "email": "ravi@example.com"}
-  ]
-}
-```
-
-PowerShell:
+On Windows, if you are not activating the virtual environment, use:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/certificate-jobs -ContentType 'application/json' -InFile request.json
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-macOS/Linux:
+Keep this terminal open while using the API. Open <http://127.0.0.1:8000/docs> for interactive API documentation. The health endpoint is <http://127.0.0.1:8000/health> and returns `{"status":"ok"}` when the API process is responding.
 
-```sh
-curl -X POST http://127.0.0.1:8000/api/v1/certificate-jobs \
-  -H 'Content-Type: application/json' --data @request.json
-```
+By default, the API stores its SQLite database at `data/certificates.db` and generated PDFs under `data/certificates/`. You can set `DATABASE_URL` and `CERTIFICATE_OUTPUT_DIR` to use different locations.
 
-The response is HTTP `202 Accepted`, with this shape:
+## Try it in Postman
 
-```json
-{
-  "job_id": "<generated-id>",
-  "status": "queued",
-  "total_recipients": 2,
-  "status_url": "/api/v1/certificate-jobs/<generated-id>"
-}
-```
+Start the API first. No API key is needed for local use.
 
-The response means the work was accepted. The PDFs may still be generating. A request-wide problem (for example, an invalid date or more than 100 rows) returns a clear `422` response. A malformed individual recipient is stored as an `invalid` result while other rows continue.
+### 1. Submit a valid bulk request
 
-## Check status and retrieve a certificate
+Create a request with:
 
-Use the returned job ID:
+- **Method:** `POST`
+- **URL:** `http://127.0.0.1:8000/api/v1/certificate-jobs`
+- **Body:** select **raw**, then **JSON**
 
-```sh
-curl http://127.0.0.1:8000/api/v1/certificate-jobs/<job_id>
-```
-
-PowerShell:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/api/v1/certificate-jobs/<job_id>
-```
-
-The status response includes overall status, total/succeeded/invalid/failed counts, percent complete, and recipient results. Each successful row has a `certificate_url`; each invalid or failed row has a safe error message. Poll the status endpoint until the status is `completed` or `completed_with_errors`.
-
-Download a successful recipient's PDF using its `recipient_id`:
-
-```sh
-curl -L http://127.0.0.1:8000/api/v1/certificate-jobs/<job_id>/recipients/<recipient_id>/certificate \
-  --output certificate.pdf
-```
-
-PowerShell:
-
-```powershell
-Invoke-WebRequest http://127.0.0.1:8000/api/v1/certificate-jobs/<job_id>/recipients/<recipient_id>/certificate -OutFile certificate.pdf
-```
-
-The download response is `application/pdf`. A job or recipient that does not exist returns `404`; a certificate that is not ready returns `409`.
-
-## Use the API from Postman
-
-Start the local API first, then create requests in Postman. No API key is required for local use.
-
-### Valid request
-
-Create a `POST` request to `http://127.0.0.1:8000/api/v1/certificate-jobs`. Select **Body → raw → JSON** and use:
+Paste this JSON and select **Send**:
 
 ```json
 {
@@ -165,11 +110,32 @@ Create a `POST` request to `http://127.0.0.1:8000/api/v1/certificate-jobs`. Sele
 }
 ```
 
-Select **Send**. The API should return `202 Accepted` with a `job_id`. Make a `GET` request to `http://127.0.0.1:8000/api/v1/certificate-jobs/{job_id}` (replace `{job_id}` with the returned value) to see progress and recipient IDs. For a successful recipient, make a `GET` request to the returned `certificate_url`; use the arrow beside **Send** and choose **Send and Download** to save the PDF.
+The API responds with `202 Accepted` and a job ID:
 
-### Invalid recipient row
+```json
+{
+  "job_id": "<generated-job-id>",
+  "status": "queued",
+  "total_recipients": 2,
+  "status_url": "/api/v1/certificate-jobs/<generated-job-id>"
+}
+```
 
-Send another `POST` with one malformed recipient and one valid one:
+`202 Accepted` means the job was received. Certificate generation may still be running.
+
+### 2. Check the job and recipient results
+
+Create a `GET` request using the `job_id` from the response:
+
+```text
+http://127.0.0.1:8000/api/v1/certificate-jobs/<job-id>
+```
+
+Replace `<job-id>` with the actual ID. The response includes job status, progress, recipient IDs, and a `certificate_url` for each successful recipient. Check again until the job status is `completed` or `completed_with_errors`.
+
+### 3. Try an invalid recipient row
+
+Submit another `POST` request with one valid and one invalid email:
 
 ```json
 {
@@ -183,74 +149,97 @@ Send another `POST` with one malformed recipient and one valid one:
 }
 ```
 
-This still returns `202 Accepted`: the job is valid, so the API records Ravi's row as `invalid` and continues processing Asha's certificate. Use the returned status URL. The final job should show `succeeded: 1`, `invalid: 1`, and `status: "completed_with_errors"`.
+The request still returns `202 Accepted`. The job continues: Asha's row can succeed, while Ravi's row is reported as `invalid`. The final job status is `completed_with_errors` when a job contains invalid or failed rows.
 
-### Invalid shared field
+### 4. Try an invalid shared field
 
-To check request-level validation, change `issue_date` to `"not-a-date"` and send the request again. The API should return `422 Unprocessable Entity` because the job's shared details cannot be used to create certificates.
+Submit a request with an invalid date, such as:
 
-## Health check
-
-```sh
-curl http://127.0.0.1:8000/health
+```json
+{
+  "event_name": "Applied AI Workshop",
+  "issue_date": "not-a-date",
+  "issuer_name": "Applied AI Team",
+  "recipients": [
+    { "name": "Asha Kumar", "email": "asha@example.com" }
+  ]
+}
 ```
 
-Expected response: `{"status":"ok"}`. This confirms that the API process answers; it does not check whether background work or disk storage is healthy.
+The API returns `422 Unprocessable Entity`; a job is not created because the shared date applies to every certificate. The same `422` response is used when required shared fields are missing, text fields are blank, the recipient list is empty, or a request contains more than 100 recipient rows.
 
-## Tests
+## Get a certificate
 
-Run all tests from the project folder:
+From the job status response, copy the `certificate_url` for a recipient whose status is `succeeded`. Make a `GET` request to that URL. For example:
+
+```text
+http://127.0.0.1:8000/api/v1/certificate-jobs/<job-id>/recipients/<recipient-id>/certificate
+```
+
+In Postman, use the arrow next to **Send** and select **Send and Download** to save the PDF. The endpoint returns `application/pdf` when the file is ready. A job or recipient that does not exist returns `404`; a certificate that is not ready returns `409`.
+
+You can also download it from a terminal:
+
+```powershell
+Invoke-WebRequest `
+  -Uri 'http://127.0.0.1:8000/api/v1/certificate-jobs/<job-id>/recipients/<recipient-id>/certificate' `
+  -OutFile 'certificate.pdf'
+```
+
+Replace both IDs with values from your job response.
+
+## Run the tests
+
+Run the full test suite from the project directory:
 
 ```sh
 python -m unittest discover -s tests -v
 ```
 
-With the Windows virtual environment:
+On Windows, you can use the virtual-environment Python directly:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-The tests cover request validation, database/repository behavior, PDF creation, job progress and per-recipient failure isolation, and HTTP behavior. They do not measure production-scale capacity.
+The tests cover input validation, database records, PDF generation, job status and progress, per-recipient failure handling, and the HTTP endpoints. The latest recorded run on 2026-10-09 passed all 28 tests.
 
-Latest local verification (2026-10-09): **28 tests passed** with the command above.
+## How it is built
 
-## Measure HTTP throughput locally
+| Part | File(s) | Responsibility |
+|---|---|---|
+| Request validation | `app/schemas.py` | Checks shared certificate fields and classifies recipient rows as valid or invalid. |
+| Database | `app/database.py`, `app/models.py`, `app/repositories.py` | Stores jobs, recipient outcomes, and certificate file locations in SQLite. |
+| PDF generation | `app/certificate_generator.py` | Draws the fixed certificate design and writes a PDF for a valid recipient. |
+| Job processing | `app/job_service.py` | Processes recipients and records each success or failure. |
+| API setup and routes | `app/main.py`, `app/routes.py` | Starts the FastAPI application and provides job, status, health, and download endpoints. |
 
-The initial local measurement is recorded below. It is a measured workload, not a guaranteed maximum or a hosted-production capacity claim. Do not treat the 100-recipient job guardrail as a requests-per-second claim.
+### Main design decisions
 
-The benchmark starts a local Uvicorn process with a temporary database and PDF directory, concurrently submits small jobs, polls them to completion, reports request counts/status codes/errors and both job-submission and total HTTP request rates, then stops the server and removes temporary files. It measures local runs, not hosted or production capacity.
+- **FastAPI** provides the HTTP API and interactive documentation at `/docs`.
+- **SQLite and SQLAlchemy** provide relational storage with a simple local setup.
+- **ReportLab** generates PDF certificates from one fixed design.
+- **Background processing in the API process** lets the API return a job ID while it creates certificates. It avoids a separate queue service, but unfinished work is not automatically resumed after a process restart.
+- **One result per recipient** keeps a single bad row or rendering failure from blocking the rest of the job.
+
+## Limits and measured performance
+
+- A job accepts at most **100 recipient rows**. This is a request-size limit, not a requests-per-second claim.
+- Jobs run in the API process. There is no durable task queue, so a server restart can interrupt unfinished work.
+- The database and PDF files are stored locally by default. They are not shared between multiple server instances.
+- The API has no authentication. Keep it local or add access controls before exposing it to other users.
+- The project does not configure cloud hosting or production storage.
+
+A small local benchmark was run twice on Windows 11 (build 26300), Python 3.14.2, with 12 logical CPUs. Each run submitted 50 one-recipient jobs with up to five concurrent client operations. Both runs accepted all 50 jobs without errors. Submission measured 13.70 to 16.80 accepted jobs per second; the full run, including status polling, measured 24.57 to 29.09 HTTP requests per second over 3.92 to 4.07 seconds.
+
+These numbers describe only those small local runs. They do not establish a maximum rate or guarantee performance on another machine or hosted service. To repeat the measurement:
 
 ```sh
 python scripts/benchmark_api.py --requests 10 --workers 2
 ```
 
-Windows virtual-environment command:
+On Windows:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\benchmark_api.py --requests 10 --workers 2
+.\.venv\Scripts\python.exe scripts/benchmark_api.py --requests 10 --workers 2
 ```
-
-### Initial measurement
-
-- Run date: 2026-10-09.
-- Environment: Windows 11 (build 26300), Python 3.14.2, 12 logical CPUs.
-- Workload: 50 one-recipient certificate jobs, up to 5 concurrent client operations, run twice.
-- Outcome: both runs accepted 50/50 POST requests (`202`) with 0 errors; status reads returned `200`.
-- Timing across the two runs: 3.92–4.07 seconds end-to-end; 13.70–16.80 accepted jobs/second during submission and 24.57–29.09 total HTTP requests/second including status polling.
-
-This verifies two runs of the small local workload above. The rate varied between runs, and SQLite/background work share one local process and disk, so these figures are only a rough local reference. They do not establish a maximum sustained rate or production capacity. Run the benchmark again on the target deployment before making a hosted capacity promise.
-
-When sharing a new result, include the machine/OS, Python version, job count, worker count, elapsed time, total request count, status-code counts, errors, and both rates printed by the script. Run it more than once before using the result as a planning estimate.
-
-## Design choices and limitations
-
-- **FastAPI:** a small Python framework that provides HTTP routes and interactive docs.
-- **SQLite + SQLAlchemy:** SQLite is a relational database that keeps local setup simple; SQLAlchemy provides the Python interface to it.
-- **ReportLab:** draws the fixed certificate design into PDF files.
-- **In-process background work:** the API returns a job ID while the same server process generates PDFs. This is simple, but it is not a durable job queue. If the process stops unexpectedly, unfinished work is not automatically resumed.
-- **One process and local files:** this first version is intended for local demonstration. Local SQLite and disk files are not shared automatically between multiple app instances and may not persist on some hosting platforms.
-- **No authentication:** anyone able to reach the API can submit jobs and download available certificates. Do not expose it publicly as-is.
-- **No public-hosting guarantee:** no hosting provider, durable queue, object storage, or production deployment is configured here.
-- **Request-size guardrail:** at most 100 recipient rows can be included in one job. This is a validation limit, not measured HTTP throughput.
-- **Throughput:** not load-tested yet. No requests-per-second capacity is claimed.
